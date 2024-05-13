@@ -1,0 +1,70 @@
+---
+title: "GSM_Laura_update"
+author: "Simon Oiry"
+format: html
+editor: source
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r packages}
+library(ncdf4)
+library(tidyverse)
+library(terra)
+library(qchlorophyll)
+
+# remotes::install_github("BIO-RSG/oceancolouR", build_vignettes = TRUE)
+
+library(oceancolouR)
+
+```
+
+```{r filelist}
+
+list_img <- list.files("Data/Netcdf/RAW/", pattern = ".nc", recursive = T, full.names = T) %>% 
+  as.data.frame() %>% 
+  rename(path = ".") %>% 
+  mutate(names = gsub(".*/","",path),
+         date = substr(names, 1,8),
+         band = substr(names,10,15) %>% 
+           toupper())
+```
+
+```{r croppping}
+
+for (i in 1:nrow(list_img)) {
+  
+  ext <- ext(-180, 180, 64, 90) # define spatial extent 
+
+  img<-rast(list_img$path[i]) %>% 
+    crop(ext)
+  
+  writeRaster(img, 
+            filename = paste0("Data/Netcdf/Cropped/",list_img$names[i]) %>% 
+              gsub(".nc",".tif",.),
+            # xname='lon', yname='lat',
+            # format = "CDF",
+            overwrite = TRUE) 
+  
+}
+
+list_img <- list_img %>% 
+  mutate(path = gsub("RAW", "Cropped",path) %>% 
+           gsub(".nc",".tif",.))
+
+```
+
+
+```{r file opening}
+
+
+img <- rast(list_img %>% 
+              dplyr::filter(date == unique(list_img$date)[date_i]) %>% 
+              pull(path))
+
+
+
+```
+
+
+
