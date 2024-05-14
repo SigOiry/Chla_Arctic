@@ -38,7 +38,20 @@ list_img <- list.files("Data/CCI_v5/NC/", pattern = ".nc", recursive = T, full.n
 
 ```{r croppping function}
 
-Cropping_CCI <- function(list_img, xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 90, saveNC = F){
+Cropping_CCI <- function(path, 
+                         xmin,
+                         xmax,
+                         ymin,
+                         ymax,
+                         saveNC){
+  
+  list_img <- list.files(path, pattern = ".nc", recursive = T, full.names = T) %>% 
+  as.data.frame() %>% 
+  rename(path = ".") %>% 
+  mutate(names = gsub(".*/","",path),
+         date = substr(names, 1,8),
+         band = substr(names,10,15) %>% 
+           toupper())
   
   ext <-  ext(xmin, xmax , ymin , ymax)
    
@@ -64,7 +77,6 @@ Cropping_CCI <- function(list_img, xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 9
               # xname='lon', yname='lat',
               # format = "CDF",
               overwrite = TRUE) 
-      
       if (saveNC) {
         
         dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F)
@@ -89,6 +101,12 @@ Cropping_CCI <- function(list_img, xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 9
       }
     }
   }
+  
+  for (i in list.files("Data/CCI_v5/Cropped_TIF/", pattern = ".tif.aux.json", full.names = T)) {
+    file.remove(i)
+    
+  }
+  
   close(cropping_pb)
 }
 
@@ -96,7 +114,15 @@ Cropping_CCI <- function(list_img, xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 9
 
 ```{r GSM function}
 
-GSM <- function(list_img, lower_bounds = c(0, 0.0001, 0.0001), upper_bounds = c(64, 2, 0.1), lambda =  c(412, 443, 490, 510, 560, 665), img_bw_NoCoords = NA){
+GSM <- function(path_cropped, lower_bounds, upper_bounds, lambda){
+  
+  list_img <- list.files(path_cropped, pattern = ".tif", recursive = T, full.names = T) %>% 
+    as.data.frame() %>% 
+    rename(path = ".") %>% 
+    mutate(names = gsub(".*/","",path),
+           date = substr(names, 1,8),
+           band = substr(names,10,15) %>% 
+             toupper())
   
   print("GSM computation :", quote=F)
   
@@ -127,13 +153,9 @@ GSM <- function(list_img, lower_bounds = c(0, 0.0001, 0.0001), upper_bounds = c(
         select(-c("x","y"))
       
       rm(img_bw)
-      lambda = lambda
-      lower_bounds = lower_bounds
-      upper_bounds = upper_bounds
-      
       cl <- makeCluster(detectCores() - 1) # use all but one core
-      clusterExport(cl, varlist = c("img_bw_NoCoords", "gsm", "lambda", "lower_bounds", "upper_bounds"))  # export necessary variables
-      clusterEvalQ(cl, {library(oceancolouR)}) 
+      # clusterExport(cl, varlist = c("img_bw_NoCoords", "gsm", "lambda", "lower_bounds", "upper_bounds"))  # export necessary variables
+      clusterEvalQ(cl, {library(oceancolouR)})
   
       GSM_IOPS_wide <- parApply(cl, img_bw_NoCoords,
                                 MARGIN = 1, 
@@ -174,37 +196,44 @@ GSM <- function(list_img, lower_bounds = c(0, 0.0001, 0.0001), upper_bounds = c(
 
 ```{r Batch function}
 
-Batch_processing <- function(path = "Data/CCI_v5/NC", lower_bounds = c(0, 0.0001, 0.0001), upper_bounds = c(64, 2, 0.1), lambda =  c(412, 443, 490, 510, 560, 665), xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 90, saveNC = F){
+Batch_processing <- function(path = "Data/CCI_v5/NC", 
+                             path_cropped = "Data/CCI_v5/Cropped_TIF",
+                             lower_bounds = c(0, 0.0001, 0.0001), 
+                             upper_bounds = c(64, 2, 0.1), 
+                             lambda =  c(412, 443, 490, 510, 560, 665), 
+                             xmin = -180,
+                             xmax = 180,
+                             ymin = 64, 
+                             ymax = 90, 
+                             saveNC = F){
   
-  list_img <- list.files(path, pattern = ".nc", recursive = T, full.names = T) %>% 
-  as.data.frame() %>% 
-  rename(path = ".") %>% 
-  mutate(names = gsub(".*/","",path),
-         date = substr(names, 1,8),
-         band = substr(names,10,15) %>% 
-           toupper())
+  Cropping_CCI(path,xmin,xmax, ymin, ymax,saveNC)
   
-  Cropping_CCI(list_img)
-  
-  list_img <- list_img %>% 
-    mutate(path = gsub("NC","Cropped_TIF",path) %>% 
-             gsub(".nc",".tif",.),
-           names = gsub(".nc",".tif",names))
-  
-  GSM(list_img)
+  GSM(path_cropped,lower_bounds, upper_bounds, lambda)
   
   
 }
-
-
 ```
 
 
 ```{r User input}
 
-Batch_processing("Data/CCI_v5/NC")
+Batch_processing(path ="Data/CCI_v5/NC", saveNC = F)
 
-GSM(list_img)
+"Arguments allowed:
+
+ - path : Path location of RAW NetCDFs. default = Data/CCI_v5/NC
+ - path_cropped : Path location of cropped tifs. default = Data/CCI_v5/Cropped_TIF
+ - xmin : minimun longitude to crop the image. default = -180
+ - xmax : maximum longitude to crop the image. default = 180
+ - ymin : minimum latitude to crop the image. default = 64
+ - ymax : maximum latitude to crop the image. default = 90
+ - saveNC : T or F, if TRUE NC will be saved at the cropping step. default = F
+ - lower_bounds : lower bounds used by the GSM function. default = c(0, 0.0001, 0.0001)
+ - upper_bounds : upper bounds used by the GSM function. default = c(64, 2, 0.1)
+ - lambda : lambda used by the GSM function. default = c(412, 443, 490, 510, 560, 665)
+
+"
 
 ```
 
