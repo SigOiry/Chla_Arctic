@@ -12,10 +12,10 @@ library(rgdal)
 ext <- extent(-180, 180, 64, 90) # define spatial extent 
 
 # Set wd and define paths for .nc files
-setwd("/Users/argonauta74/Desktop/Laura_files_work/Laura_files")
-Path <- paste(getwd(),"/2009/", sep = "") 
+setwd("Data/Netcdf/RAW")
+Path <- getwd()
 
-tmp <- system(paste("ls",Path),intern = TRUE)
+tmp <- system(paste("ls",Path))
 
 # list of file 
 data_obs <- data.frame(file_name = tmp, date = format(strptime(substr(tmp, 1, 8),"%Y%m%d")), stringsAsFactors = F)

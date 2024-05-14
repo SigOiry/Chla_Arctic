@@ -8,6 +8,9 @@ editor_options:
 ---
 
 ```{r packages}
+
+ rm(list = ls())
+
 library(ncdf4)
 library(tidyverse)
 library(terra)
@@ -16,12 +19,15 @@ library(qchlorophyll)
 # remotes::install_github("BIO-RSG/oceancolouR", build_vignettes = TRUE)
 
 library(oceancolouR)
+library(parallel)
+library(tictoc)
+
 
 ```
 
 ```{r filelist}
 
-list_img <- list.files("Data/Netcdf/RAW/", pattern = ".nc", recursive = T, full.names = T) %>% 
+list_img <- list.files("Data/CCI_v5/NC/", pattern = ".nc", recursive = T, full.names = T) %>% 
   as.data.frame() %>% 
   rename(path = ".") %>% 
   mutate(names = gsub(".*/","",path),
@@ -30,41 +36,182 @@ list_img <- list.files("Data/Netcdf/RAW/", pattern = ".nc", recursive = T, full.
            toupper())
 ```
 
-```{r croppping}
+```{r croppping function}
 
-for (i in 1:nrow(list_img)) {
+Cropping_CCI <- function(list_img, xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 90, saveNC = F){
   
-  ext <- ext(-180, 180, 64, 90) # define spatial extent 
+  ext <-  ext(xmin, xmax , ymin , ymax)
+   
+  print("Cropping :", quote=F)
 
-  img<-rast(list_img$path[i]) %>% 
-    crop(ext)
+  cropping_pb <- txtProgressBar(min = 0, max = nrow(list_img), style = 3)
   
-  writeRaster(img, 
-            filename = paste0("Data/Netcdf/Cropped/",list_img$names[i]) %>% 
-              gsub(".nc",".tif",.),
-            # xname='lon', yname='lat',
-            # format = "CDF",
-            overwrite = TRUE) 
+  for (i in 1:nrow(list_img)) {
+    
+     
+     setTxtProgressBar(cropping_pb, i)
+    
+    if (file.exists(paste0("Data/CCI_v5/Cropped_TIF/",list_img$names[i])%>%gsub(".nc",".tif",.)) == F) {
+      
+      img<-rast(list_img$path[i]) %>% 
+        crop(ext)
+    
+      dir.create("Data/CCI_v5/Cropped_TIF/", showWarnings = F)
+      
+      writeRaster(img, 
+              filename = paste0("Data/CCI_v5/Cropped_TIF/",list_img$names[i]) %>% 
+                gsub(".nc",".tif",.),
+              # xname='lon', yname='lat',
+              # format = "CDF",
+              overwrite = TRUE) 
+      
+      if (saveNC) {
+        
+        dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F)
+        writeCDF(img,
+                 filename = paste0("Data/CCI_v5/Cropped_NC/",list_img$names[i]),
+                 varname=list_img$band[i],
+                 overwrite = TRUE) 
+      } 
+      
+    
+    }else{
+      if (saveNC == T & file.exists(paste0("Data/CCI_v5/Cropped_NC/",list_img$names[i])) == F) {
+        img<-rast(list_img$path[i]) %>% 
+          crop(ext)
+        
+        dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F)
+        writeCDF(img,
+                 filename = paste0("Data/CCI_v5/Cropped_NC/",list_img$names[i]),
+                 varname=list_img$band[i],
+                 overwrite = TRUE)
+        
+      }
+    }
+  }
+  close(cropping_pb)
+}
+
+```
+
+```{r GSM function}
+
+GSM <- function(list_img, lower_bounds = c(0, 0.0001, 0.0001), upper_bounds = c(64, 2, 0.1), lambda =  c(412, 443, 490, 510, 560, 665), img_bw_NoCoords = NA){
+  
+  print("GSM computation :", quote=F)
+  
+  GSM_pb <- txtProgressBar(min = 0, max = length(unique(list_img$date)), style = 3)
+
+  
+  for (date_i in 1:length(unique(list_img$date))) {
+    
+    output_name <- paste0(list_img$date[date_i],"_CHL_GSM-4km.nc")
+    setTxtProgressBar(GSM_pb, date_i)
+    
+    if (file.exists(paste0("Data/GSM/CCI_v5/",output_name)) == F ) {
+
+      
+      img_bw <- rast(list_img %>% 
+                dplyr::filter(date == unique(list_img$date)[date_i]) %>% 
+                pull(path)) %>% 
+        as.data.frame(xy = T) %>% 
+        pivot_longer(-c(x,y), names_to = "Band", values_to = "Ref") %>% 
+        dplyr::filter(Ref != 0) %>% 
+        mutate(Ref = Ref/(0.52+1.7*Ref)) %>% 
+        pivot_wider(names_from = "Band", values_from = "Ref")  
+      
+      coords <- img_bw %>% 
+        select(c("x","y"))
+      
+      img_bw_NoCoords <- img_bw %>% 
+        select(-c("x","y"))
+      
+      rm(img_bw)
+      lambda = lambda
+      lower_bounds = lower_bounds
+      upper_bounds = upper_bounds
+      
+      cl <- makeCluster(detectCores() - 1) # use all but one core
+      clusterExport(cl, varlist = c("img_bw_NoCoords", "gsm", "lambda", "lower_bounds", "upper_bounds"))  # export necessary variables
+      clusterEvalQ(cl, {library(oceancolouR)}) 
+  
+      GSM_IOPS_wide <- parApply(cl, img_bw_NoCoords,
+                                MARGIN = 1, 
+                                FUN = function(x) gsm(x, 
+                                                      lambda = lambda, 
+                                                      algorithm = "port", 
+                                                      lower = lower_bounds, 
+                                                      upper = upper_bounds))
+      stopCluster(cl)
+      
+      GSM_IOPS_long <- t(GSM_IOPS_wide) %>% 
+        as_tibble() %>% 
+        set_names(c("chla_GSM", "adg443_GSM", "bbp433_GSM", "invalida_GSM")) %>% 
+        cbind(coords)
+      
+      r <- GSM_IOPS_long %>% 
+        relocate(x,y) %>% 
+        rast(type="xyz",crs="EPSG:4326")
+      
+      output_name <- paste0(list_img$date[date_i],"_CHL_GSM-4km.nc")
+      
+      dir.create("Data/GSM/CCI_v5/", showWarnings = F)
+      
+      writeCDF(r$chla_GSM,
+                 filename = paste0("Data/GSM/CCI_v5/",output_name),
+                 varname="chla_GSM",
+                 overwrite = TRUE) 
+    
+    }
+  }
+  
+  close(GSM_pb)
+
+}
+
+
+```
+
+```{r Batch function}
+
+Batch_processing <- function(path = "Data/CCI_v5/NC", lower_bounds = c(0, 0.0001, 0.0001), upper_bounds = c(64, 2, 0.1), lambda =  c(412, 443, 490, 510, 560, 665), xmin = -180 ,xmax = 180 ,ymin = 64 , ymax = 90, saveNC = F){
+  
+  list_img <- list.files(path, pattern = ".nc", recursive = T, full.names = T) %>% 
+  as.data.frame() %>% 
+  rename(path = ".") %>% 
+  mutate(names = gsub(".*/","",path),
+         date = substr(names, 1,8),
+         band = substr(names,10,15) %>% 
+           toupper())
+  
+  Cropping_CCI(list_img)
+  
+  list_img <- list_img %>% 
+    mutate(path = gsub("NC","Cropped_TIF",path) %>% 
+             gsub(".nc",".tif",.),
+           names = gsub(".nc",".tif",names))
+  
+  GSM(list_img)
+  
   
 }
 
-list_img <- list_img %>% 
-  mutate(path = gsub("RAW", "Cropped",path) %>% 
-           gsub(".nc",".tif",.))
 
 ```
 
 
-```{r file opening}
+```{r User input}
 
+Batch_processing("Data/CCI_v5/NC")
 
-img <- rast(list_img %>% 
-              dplyr::filter(date == unique(list_img$date)[date_i]) %>% 
-              pull(path))
-
-
+GSM(list_img)
 
 ```
+
+
+
+
+
 
 
 
