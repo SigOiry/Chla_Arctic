@@ -25,17 +25,6 @@ library(tictoc)
 
 ```
 
-```{r filelist}
-
-list_img <- list.files("Data/CCI_v5/NC/", pattern = ".nc", recursive = T, full.names = T) %>% 
-  as.data.frame() %>% 
-  rename(path = ".") %>% 
-  mutate(names = gsub(".*/","",path),
-         date = substr(names, 1,8),
-         band = substr(names,10,15) %>% 
-           toupper())
-```
-
 ```{r croppping function}
 
 Cropping_CCI <- function(path, 
@@ -69,7 +58,7 @@ Cropping_CCI <- function(path,
       img<-rast(list_img$path[i]) %>% 
         crop(ext)
     
-      dir.create("Data/CCI_v5/Cropped_TIF/", showWarnings = F)
+      dir.create("Data/CCI_v5/Cropped_TIF/", showWarnings = F,recursive = T)
       
       writeRaster(img, 
               filename = paste0("Data/CCI_v5/Cropped_TIF/",list_img$names[i]) %>% 
@@ -79,7 +68,7 @@ Cropping_CCI <- function(path,
               overwrite = TRUE) 
       if (saveNC) {
         
-        dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F)
+        dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F,recursive = T)
         writeCDF(img,
                  filename = paste0("Data/CCI_v5/Cropped_NC/",list_img$names[i]),
                  varname=list_img$band[i],
@@ -92,7 +81,7 @@ Cropping_CCI <- function(path,
         img<-rast(list_img$path[i]) %>% 
           crop(ext)
         
-        dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F)
+        dir.create("Data/CCI_v5/Cropped_NC/", showWarnings = F,recursive = T)
         writeCDF(img,
                  filename = paste0("Data/CCI_v5/Cropped_NC/",list_img$names[i]),
                  varname=list_img$band[i],
@@ -131,7 +120,7 @@ GSM <- function(path_cropped, lower_bounds, upper_bounds, lambda){
   
   for (date_i in 1:length(unique(list_img$date))) {
     
-    output_name <- paste0(list_img$date[date_i],"_CHL_GSM-4km.nc")
+    output_name <- paste0(unique(list_img$date)[date_i],"_CHL_GSM-4km.nc")
     setTxtProgressBar(GSM_pb, date_i)
     
     if (file.exists(paste0("Data/GSM/CCI_v5/",output_name)) == F ) {
@@ -177,7 +166,7 @@ GSM <- function(path_cropped, lower_bounds, upper_bounds, lambda){
       
       output_name <- paste0(list_img$date[date_i],"_CHL_GSM-4km.nc")
       
-      dir.create("Data/GSM/CCI_v5/", showWarnings = F)
+      dir.create("Data/GSM/CCI_v5/", showWarnings = F,recursive = T)
       
       writeCDF(r$chla_GSM,
                  filename = paste0("Data/GSM/CCI_v5/",output_name),
@@ -216,31 +205,28 @@ Batch_processing <- function(path = "Data/CCI_v5/NC",
 ```
 
 
+
+
+
 ```{r User input}
 
-Batch_processing(path ="Data/CCI_v5/NC", saveNC = F)
+Batch_processing(path ="Data/CCI_v5/NC")
 
-"Arguments allowed:
+# Arguments allowed:
+# 
+#  - path : Path location of RAW NetCDFs. default = Data/CCI_v5/NC
+#  - path_cropped : Path location of cropped tifs. default = Data/CCI_v5/Cropped_TIF
+#  - xmin : minimun longitude to crop the image. default = -180
+#  - xmax : maximum longitude to crop the image. default = 180
+#  - ymin : minimum latitude to crop the image. default = 64
+#  - ymax : maximum latitude to crop the image. default = 90
+#  - saveNC : TRUE or FALSE, if TRUE NC will be saved at the cropping step. default = F
+#  - lower_bounds : lower bounds used by the GSM function. default = c(0, 0.0001, 0.0001)
+#  - upper_bounds : upper bounds used by the GSM function. default = c(64, 2, 0.1)
+#  - lambda : lambda used by the GSM function. default = c(412, 443, 490, 510, 560, 665)
 
- - path : Path location of RAW NetCDFs. default = Data/CCI_v5/NC
- - path_cropped : Path location of cropped tifs. default = Data/CCI_v5/Cropped_TIF
- - xmin : minimun longitude to crop the image. default = -180
- - xmax : maximum longitude to crop the image. default = 180
- - ymin : minimum latitude to crop the image. default = 64
- - ymax : maximum latitude to crop the image. default = 90
- - saveNC : T or F, if TRUE NC will be saved at the cropping step. default = F
- - lower_bounds : lower bounds used by the GSM function. default = c(0, 0.0001, 0.0001)
- - upper_bounds : upper bounds used by the GSM function. default = c(64, 2, 0.1)
- - lambda : lambda used by the GSM function. default = c(412, 443, 490, 510, 560, 665)
 
-"
 
 ```
-
-
-
-
-
-
 
 
