@@ -164,7 +164,7 @@ GSM <- function(path_cropped, lower_bounds, upper_bounds, lambda){
         relocate(x,y) %>% 
         rast(type="xyz",crs="EPSG:4326")
       
-      output_name <- paste0(list_img$date[date_i],"_CHL_GSM-4km.nc")
+      output_name <- paste0(unique(list_img$date)[date_i],"_CHL_GSM-4km.nc")
       
       dir.create("Data/GSM/CCI_v5/", showWarnings = F,recursive = T)
       
